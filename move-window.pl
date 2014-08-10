@@ -5,11 +5,13 @@
 use strict;
 use warnings;
 
-if (@ARGV !=1) {
+my $VERBOSE = 0;
+
+if (@ARGV < 1) {
     usage();
 }
 
-my $direction = getDirection($ARGV[0]);
+my $direction = getDirection(@ARGV);
 my $monitors = parseMonitors();
 my $windowid = getActiveWindowId();
 my $geometry = getWindowGeometry($windowid);
@@ -21,8 +23,10 @@ if ($currentMonitorIndex == -1) {
 }
 
 my $newIndex = $currentMonitorIndex + $direction;
+logMessage("New Monitor will be [$newIndex]");
 
 if ($newIndex < 0 || $newIndex >= @{$monitors}) {
+    logMessage("Already on Monitor [$newIndex]");
     exit 0;
 }
 
@@ -30,6 +34,12 @@ my $newGeometry = calculateMovedGeometry($geometry, $monitors->[$currentMonitorI
 moveWindow($windowid, $newGeometry);
 
 exit(0);
+
+sub logMessage {
+    if ($VERBOSE) {
+        print $_[0] . "\n";
+    }
+}
 
 sub moveWindow {
     my $windowid = shift;
@@ -42,12 +52,26 @@ sub moveWindow {
 }
 
 sub getDirection {
-    if ($_[0] eq 'left') {
-        return -1;
-    } elsif ($_[0] eq 'right') {
-        return 1;
+    my $direction;
+    foreach my $arg (@_) {
+        if ($arg eq '-v') {
+            print "Being verbose\n";
+            $VERBOSE = 1;
+        } else {
+            if ($arg eq 'left') {
+                $direction = -1;
+            } elsif ($arg eq 'right') {
+                $direction = 1;
+            } else {
+                usage();
+            }
+        }
     }
-    usage();
+    if (!$direction) {
+        usage();
+    }
+    logMessage("Moving window " . ($direction == -1? "left" : "right"));
+    return $direction;
 }
 
 sub parseMonitors {
@@ -55,8 +79,7 @@ sub parseMonitors {
     foreach my $line (`xrandr --current`) {
         chomp $line;
         next if $line !~ / connected /;
-        my $specString = (split(/ /, $line))[2];
-        next if $specString !~ /^(\d+)x(\d+)([+-]\d+)([+-]\d+)$/;
+        next if $line !~ / (\d+)x(\d+)([+-]\d+)([+-]\d+) /;
         my $width = $1;
         my $height = $2;
         my $offsetX = $3;
@@ -64,14 +87,17 @@ sub parseMonitors {
         my $xStart = $offsetX + 0;
         my $xEnd = $xStart + $width;
         push @monitors, [$xStart, $xEnd];
+        logMessage("Found monitor from [$xStart] to [$xEnd]");
     }
     @monitors = sort {$a->[0] <=> $b->[0]} @monitors;
     return \@monitors;
 }
 
+
 sub getActiveWindowId {
     my $windowid = `xdotool getactivewindow`;
     chomp($windowid);
+    logMessage("Window ID [$windowid]");
     return $windowid;
 }
 
@@ -89,6 +115,8 @@ sub getWindowGeometry {
     my ($windowWidth) = $geometryString =~ /WIDTH=(\d+)/;
     my ($windowHeight) = $geometryString =~ /HEIGHT=(\d+)/;
 
+    logMessage("Window X [$windowX], Window Y [$windowY]");
+    logMessage("Window Width [$windowWidth], Window Height [$windowHeight]");
     return [$windowX, $windowY, $windowWidth, $windowHeight];
 }
 
@@ -96,8 +124,14 @@ sub getMaximizedState {
     my $windowid = shift;
     my $stateString = `xprop -id $windowid _NET_WM_STATE`;
     my @maxList = ();
-    push @maxList, 'maximized_horz' if $stateString =~ /_NET_WM_STATE_MAXIMIZED_HORZ/;
-    push @maxList, 'maximized_vert' if $stateString =~ /_NET_WM_STATE_MAXIMIZED_VERT/;
+    if ($stateString =~ /_NET_WM_STATE_MAXIMIZED_HORZ/) {
+        push @maxList, 'maximized_horz';
+        logMessage("Window is maximized (horizontal)");
+    }
+    if ($stateString =~ /_NET_WM_STATE_MAXIMIZED_VERT/) {
+        push @maxList, 'maximized_vert';
+        logMessage("Window is maximized (vertical)");
+    }
     return @maxList;
 }
 
@@ -127,6 +161,7 @@ sub getCurrentMonitorForWindow {
             $maxPercent = $percentOn;
         }
     }
+    logMessage("Current window is on Monitor [$monitorIndex]");
     return $monitorIndex;
 }
 
@@ -136,11 +171,13 @@ sub calculateMovedGeometry {
     my ($newMonStart, $newMonEnd) = @{shift()};
     my $fromLeft = $windowX - $oldMonStart;
     my $newX = $newMonStart + $fromLeft;
+    logMessage("New X [$newX], New Y [$windowY]");
+    logMessage("New Width [$windowWidth], New Height [$windowHeight]");
     return [$newX, $windowY, $windowWidth, $windowHeight];
 }
 
 sub usage {
-    print "Usage: $0 left|right\n";
+    print "Usage: $0 [-v] left|right\n";
     exit(1);
 }
 
